@@ -1,6 +1,5 @@
 ﻿#include "xls2csv.h"
 
-#include <pybind11/embed.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
@@ -10,7 +9,6 @@
 #include <chrono>
 #include <execution>
 #include <filesystem>
-#include <fstream>
 #include <map>
 #include <shared_mutex>
 #include <sstream>
@@ -18,6 +16,8 @@
 #include <vector>
 
 #include <xls.h>
+
+
 
 namespace fs = std::filesystem;
 namespace py = pybind11;
@@ -63,7 +63,7 @@ struct Col {
   Type type = Comment;
 
   Type parseType(string_view s) {
-    auto l = tolower(s);    
+    auto l = tolower(s);
     if (l == "int")
       return Int;
     else if (l == "float")
@@ -77,6 +77,7 @@ struct Col {
 };
 
 using StrMap = std::map<string, string>;
+
 struct Cache {
   StrMap files;
   std::shared_mutex mu;
@@ -84,10 +85,6 @@ struct Cache {
   void addFile(string f, string data) {
     std::unique_lock l{mu};
     files[f] = std::move(data);
-  }
-  const string& Get(string f) {
-    std::shared_lock l{mu};
-    return files[f];
   }
 };
 
@@ -150,6 +147,11 @@ void parseXls(string fname,
     map<int, Col> header;
     stringstream csv;
     error = xls_parseWorkSheet(work_sheet);
+    if (error != LIBXLS_OK) {
+      printf("Error reading sheet: %s %s %s\n", xls_getError(error),
+             fname.data(), sheet_name.data());
+      return;
+    }
     int realColCnt = 0;
     int rowIdxEnd = work_sheet->rows.lastrow, colEnd = work_sheet->rows.lastcol;
 
@@ -164,8 +166,6 @@ void parseXls(string fname,
           auto& h = header[colIdx];
 
           if (c.id == XLS_RECORD_BLANK) {
-            h.type = Col::Comment;
-
             // end fo columns
             if (all_of(cells + colIdx, cells + colEnd,
                        [](auto& c) { return c.id == XLS_RECORD_BLANK; })) {
@@ -202,7 +202,7 @@ void parseXls(string fname,
       }
 
       // empty line, end of data
-      if (std::all_of(cells, row->cells.cell + realColCnt,
+      if (std::all_of(cells, cells + realColCnt,
                       [](auto& c) { return c.id == XLS_RECORD_BLANK; })) {
         break;
       }
